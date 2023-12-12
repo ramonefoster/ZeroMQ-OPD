@@ -32,8 +32,11 @@ poller.register(puller, zmq.POLLIN)
 
 #foc_dev.move(8000)
 
-previous_is_mov = None
-previous_pos = None
+previous_is_mov = '0'
+previous_pos = '0'
+
+publer.send_multipart([b'/focuser/0/ismoving', previous_is_mov.encode()])
+publer.send_multipart([b'/focuser/0/postion', previous_pos.encode()])
 
 while True:
     socks = dict(poller.poll(200))
@@ -50,17 +53,17 @@ while True:
     publer.send_string(f"/focuser/0/description {FocuserMetadata.Description}")
 
         # Retrieve current values
-    current_is_mov = foc_dev.is_moving
-    current_pos = foc_dev.position
+    current_is_mov = str(foc_dev.is_moving)
+    current_pos = str(foc_dev.position)
 
     if current_is_mov != previous_is_mov:
         print("is_mov", current_is_mov)
-        publer.send_string(f"/focuser/0/ismoving {current_is_mov}")
+        publer.send_multipart([b"/focuser/0/ismoving", current_is_mov.encode()])
         previous_is_mov = current_is_mov
 
     if current_pos != previous_pos:
         print("pos", current_pos)
-        publer.send_string(f"/focuser/0/position {current_pos}")
+        publer.send_multipart([b"/focuser/0/position", current_pos.encode()])
         previous_pos = current_pos
 
         # Add a small delay to avoid excessive processing
