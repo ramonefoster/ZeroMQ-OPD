@@ -1,13 +1,24 @@
 import zmq
 
 context = zmq.Context()
+subscriber = context.socket(zmq.SUB)
+subscriber.connect("tcp://200.131.64.237:7001")
 
-subscriber = context.socket(zmq.PUB)
-subscriber.connect("tcp://192.168.11.71:7001")
-subscriber.curve_publickey = b"seNhApUbLiCa_#ExeMpL0"  # PUBLIC KEY
+# Subscribe to multiple topics
+subscriber.setsockopt(zmq.SUBSCRIBE, b'/observingconditions/humidity')
+subscriber.setsockopt(zmq.SUBSCRIBE, b'/observingconditions/temperature')
+subscriber.setsockopt(zmq.SUBSCRIBE, b'/observingconditions/windspeed')
+subscriber.setsockopt(zmq.SUBSCRIBE, b'/observingconditions/winddirection')
+subscriber.setsockopt(zmq.SUBSCRIBE, b'/observingconditions/pressure')
 
-subscriber.getsockopt_string(zmq.SUBSCRIBE, '/focuser/0/position')
+poller = zmq.Poller()
+poller.register(subscriber, zmq.POLLIN)
 
 while True:
-    subscriber.recv_string()
+    socks = dict(poller.poll(100))
+    if socks.get(subscriber) == zmq.POLLIN:
+        message = subscriber.recv_multipart()
+        topic = message[0]
+        data = message[1]  # Assuming the data is received as the second part of the multipart message
+        print(f"Received: {topic.decode()} - {data.decode()}")
     
