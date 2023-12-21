@@ -6,11 +6,7 @@ from PyQt5 import QtGui
 
 import zmq
 import sys
-
-from focuserDevice import Focuser
-
-foc_dev = Focuser()
-foc_dev.connected = True
+import json
 
 class FocuserMetadata:
     """ Metadata describing the Focuser Device. Edit for your device"""
@@ -23,7 +19,7 @@ class FocuserMetadata:
     MaxDeviceNumber = 1
     InterfaceVersion = 3
 
-Ui_MainWindow, QtBaseClass = uic.loadUiType(r'assets\UI\focuser.ui')
+Ui_MainWindow, QtBaseClass = uic.loadUiType('assets/UI/focus.ui')
 
 class FocuserOPD(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -32,6 +28,9 @@ class FocuserOPD(QtWidgets.QMainWindow, Ui_MainWindow):
         self.setupUi(self)
 
         self.btnMove.clicked.connect(self.move_to)
+        self.btnConnect.clicked.connect(self.connect)
+        self.btnHalt.clicked.connect(self.halt)
+        self.btnHome.clicked.connect(self.home)
 
         self.context = zmq.Context()       
 
@@ -41,7 +40,9 @@ class FocuserOPD(QtWidgets.QMainWindow, Ui_MainWindow):
         self.previous_is_mov = None
         self.previous_pos = None
 
+        self.connected = False
         self.is_moving = False
+        self.homing = False
         self.position = 0
 
         self.start_client()
@@ -52,8 +53,8 @@ class FocuserOPD(QtWidgets.QMainWindow, Ui_MainWindow):
     
     def start_client(self):
         self.subscriber = self.context.socket(zmq.SUB)
-        self.subscriber.connect(f"tcp://192.168.11.71:7001")
-        topics_to_subscribe = '/focuser/0/'
+        self.subscriber.connect(f"tcp://192.168.1.101:7001")
+        topics_to_subscribe = ''
 
         self.subscriber.setsockopt_string(zmq.SUBSCRIBE, topics_to_subscribe)
 
@@ -61,35 +62,62 @@ class FocuserOPD(QtWidgets.QMainWindow, Ui_MainWindow):
         self.poller.register(self.subscriber, zmq.POLLIN)
 
         self.pusher = self.context.socket(zmq.PUSH)
-        self.pusher.connect("tcp://192.168.11.71:7005")
+        self.pusher.connect("tcp://192.168.1.101:7002")
+
+        self.req = self.context.socket(zmq.REQ)
+        self.req.connect("tcp://192.168.1.101:7003")
     
+    def connect(self):
+        self.pusher.send("CONN".encode())
+    
+    def home(self):
+        self.pusher.send("INIT".encode())
+    
+    def disconnect(self):
+        self.pusher.send("DC".encode())
+    
+    def halt(self):
+        self.pusher.send('HALT'.encode())
+
     def move_to(self):
         if not self.is_moving:
             pos = self.txtMov.text()
-            self.pusher.send_string(pos)
+            self.pusher.send_string(f"M{pos}")
     
     def update(self):
         self.socks = dict(self.poller.poll(100))
         if self.socks.get(self.subscriber) == zmq.POLLIN:
-            topic, message = self.subscriber.recv_multipart()
-            topic = topic.decode()
-            message = message.decode()
-            try:      
-                if topic == '/focuser/0/position':
-                    pos = message
-                    self.position = int(pos)                    
-                    self.BarFocuser.setValue(int(self.position*3.16))
-                elif topic == '/focuser/0/ismoving':
-                    if message == 'True':
-                        self.is_moving = True
-                        self.statMov.setStyleSheet("background-color: lightgreen")
-                    else:
-                        self.is_moving = False
-                        self.statMov.setStyleSheet("background-color: indianred")                
+            message = self.subscriber.recv_string()
+            data = json.loads(message)
+            try: 
+                self.position = int(data["position"])                    
+                self.BarFocuser.setValue(int(self.position))
+                if data["homing"]:
+                    self.homing = True
+                    self.statInit.setStyleSheet("background-color: lightgreen")
+                else:
+                    self.homing = False
+                    self.statInit.setStyleSheet("background-color: indianred") 
+                if data["is_moving"]:
+                    self.is_moving = True
+                    self.statMov.setStyleSheet("background-color: lightgreen")
+                else:
+                    self.is_moving = False
+                    self.statMov.setStyleSheet("background-color: indianred") 
+                if data["connected"]:
+                    self.connected = True
+                    self.statConn.setStyleSheet("background-color: lightgreen")
+                else:
+                    self.connected = False
+                    self.statConn.setStyleSheet("background-color: indianred")               
             except:
                 self.BarFocuser.setValue(0)
-        # else:
-        #     print("ELSE")
+    
+    def closeEvent(self, event):
+        """Close application"""
+        print("Closing")
+        self.disconnect()
+        event.accept()
 
 if __name__ == "__main__":
     main_app = QtWidgets.QApplication(sys.argv)
